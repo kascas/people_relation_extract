@@ -1,4 +1,3 @@
-# coding:utf-8
 import os
 import tempfile
 import random
@@ -15,7 +14,7 @@ def import_tf(device_id=-1, verbose=False):
     # os.environ['CUDA_VISIBLE_DEVICES'] = '-1' if device_id < 0 else str(device_id)
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0' if verbose else '3'
     import tensorflow as tf
-    tf.logging.set_verbosity(tf.logging.DEBUG if verbose else tf.logging.ERROR)
+    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.DEBUG if verbose else tf.compat.v1.logging.ERROR)
     return tf
 
 
@@ -42,23 +41,24 @@ def optimize_graph(logger=None, verbose=False, pooling_strategy=PoolingStrategy.
         from tensorflow.python.tools.optimize_for_inference_lib import optimize_for_inference
 
         # allow_soft_placement:自动选择运行设备
-        config = tf.ConfigProto(allow_soft_placement=True)
+        config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
         config_fp = args.config_name
         init_checkpoint = args.ckpt_name
         logger.info('model config: %s' % config_fp)
 
         # 加载bert配置文件
-        with tf.gfile.GFile(config_fp, 'r') as f:
+        with tf.io.gfile.GFile(config_fp, 'r') as f:
             bert_config = modeling.BertConfig.from_dict(json.load(f))
 
         logger.info('build graph...')
+        tf.compat.v1.disable_eager_execution()
         # input placeholders, not sure if they are friendly to XLA
-        input_ids = tf.placeholder(tf.int32, (None, max_seq_len), 'input_ids')
-        input_mask = tf.placeholder(tf.int32, (None, max_seq_len), 'input_mask')
-        input_type_ids = tf.placeholder(tf.int32, (None, max_seq_len), 'input_type_ids')
+        input_ids = tf.compat.v1.placeholder(tf.int32, (None, max_seq_len), 'input_ids')
+        input_mask = tf.compat.v1.placeholder(tf.int32, (None, max_seq_len), 'input_mask')
+        input_type_ids = tf.compat.v1.placeholder(tf.int32, (None, max_seq_len), 'input_type_ids')
 
         # xla加速
-        jit_scope = tf.contrib.compiler.jit.experimental_jit_scope if args.xla else contextlib.suppress
+        jit_scope = tf.xla.experimental.jit_scope if args.xla else contextlib.suppress
 
         with jit_scope():
             input_tensors = [input_ids, input_mask, input_type_ids]
@@ -72,21 +72,21 @@ def optimize_graph(logger=None, verbose=False, pooling_strategy=PoolingStrategy.
                 use_one_hot_embeddings=False)
 
             # 获取所有要训练的变量
-            tvars = tf.trainable_variables()
+            tvars = tf.compat.v1.trainable_variables()
 
             (assignment_map, initialized_variable_names) = modeling.get_assignment_map_from_checkpoint(tvars,
                                                                                                        init_checkpoint)
 
-            tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
+            tf.compat.v1.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
             minus_mask = lambda x, m: x - tf.expand_dims(1.0 - m, axis=-1) * 1e30
             mul_mask = lambda x, m: x * tf.expand_dims(m, axis=-1)
-            masked_reduce_max = lambda x, m: tf.reduce_max(minus_mask(x, m), axis=1)
-            masked_reduce_mean = lambda x, m: tf.reduce_sum(mul_mask(x, m), axis=1) / (
-                    tf.reduce_sum(m, axis=1, keepdims=True) + 1e-10)
+            masked_reduce_max = lambda x, m: tf.reduce_max(input_tensor=minus_mask(x, m), axis=1)
+            masked_reduce_mean = lambda x, m: tf.reduce_sum(input_tensor=mul_mask(x, m), axis=1) / (
+                    tf.reduce_sum(input_tensor=m, axis=1, keepdims=True) + 1e-10)
 
             # 共享卷积核
-            with tf.variable_scope("pooling"):
+            with tf.compat.v1.variable_scope("pooling"):
                 # 如果只有一层，就只取对应那一层的weight
                 if len(args.layer_indexes) == 1:
                     encoder_layer = model.all_encoder_layers[args.layer_indexes[0]]
@@ -110,8 +110,8 @@ def optimize_graph(logger=None, verbose=False, pooling_strategy=PoolingStrategy.
                     pooled = tf.squeeze(encoder_layer[:, 0:1, :], axis=1)
                 elif pooling_strategy == PoolingStrategy.LAST_TOKEN or \
                         pooling_strategy == PoolingStrategy.SEP_TOKEN:
-                    seq_len = tf.cast(tf.reduce_sum(input_mask, axis=1), tf.int32)
-                    rng = tf.range(0, tf.shape(seq_len)[0])
+                    seq_len = tf.cast(tf.reduce_sum(input_tensor=input_mask, axis=1), tf.int32)
+                    rng = tf.range(0, tf.shape(input=seq_len)[0])
                     indexes = tf.stack([rng, seq_len - 1], 1)
                     pooled = tf.gather_nd(encoder_layer, indexes)
                 elif pooling_strategy == PoolingStrategy.NONE:
@@ -122,13 +122,13 @@ def optimize_graph(logger=None, verbose=False, pooling_strategy=PoolingStrategy.
             pooled = tf.identity(pooled, 'final_encodes')
 
             output_tensors = [pooled]
-            tmp_g = tf.get_default_graph().as_graph_def()
+            tmp_g = tf.compat.v1.get_default_graph().as_graph_def()
 
-        with tf.Session(config=config) as sess:
+        with tf.compat.v1.Session(config=config) as sess:
             logger.info('load parameters from checkpoint...')
-            sess.run(tf.global_variables_initializer())
+            sess.run(tf.compat.v1.global_variables_initializer())
             logger.info('freeze...') 
-            tmp_g = tf.graph_util.convert_variables_to_constants(sess, tmp_g, [n.name[:-2] for n in output_tensors])
+            tmp_g = tf.compat.v1.graph_util.convert_variables_to_constants(sess, tmp_g, [n.name[:-2] for n in output_tensors])
             dtypes = [n.dtype for n in input_tensors]
             logger.info('optimize...')
             tmp_g = optimize_for_inference(
@@ -142,7 +142,7 @@ def optimize_graph(logger=None, verbose=False, pooling_strategy=PoolingStrategy.
         #tmp_file = "./tmp_graph"+str(r)
         tmp_file = "./tmp_graph11"
         logger.info('write graph to a tmp file: %s' % tmp_file)
-        with tf.gfile.GFile(tmp_file, 'wb') as f:
+        with tf.io.gfile.GFile(tmp_file, 'wb') as f:
             f.write(tmp_g.SerializeToString())
         return tmp_file
     except Exception as e:

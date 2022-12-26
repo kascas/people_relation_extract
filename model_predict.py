@@ -4,8 +4,11 @@
 import os, json
 import numpy as np
 from bert.extract_feature import BertVector
-from keras.models import load_model
+from tensorflow.keras.models import load_model
 from att import Attention
+import tensorflow as tf
+
+tf.compat.v1.disable_eager_execution()
 
 # 加载训练效果最好的模型
 model_dir = './models'
@@ -40,7 +43,7 @@ print(text)
 
 
 # 利用BERT提取句子特征
-bert_model = BertVector(pooling_strategy="NONE", max_seq_len=80)
+bert_model = BertVector(pooling_strategy="NONE", max_seq_len=128)
 vec = bert_model.encode([text])["encodes"][0]
 x_train = np.array([vec])
 

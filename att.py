@@ -1,6 +1,5 @@
-# -*- coding: utf-8 -*-
 from keras import backend as K
-from keras.engine.topology import Layer
+from keras.layers import Layer
 
 
 # 利用Keras构造注意力机制层

@@ -1,23 +1,29 @@
-# -*- coding: utf-8 -*-
 # 模型训练
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 import json
 import numpy as np
-from keras.utils import to_categorical
-from keras.models import Model
-from keras.optimizers import Adam
-from keras.layers import Input, Dense
-from keras.callbacks import EarlyStopping
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Input, Dense
+from tensorflow.keras.callbacks import EarlyStopping
 from att import Attention
-from keras.layers import GRU, LSTM, Bidirectional
-from keras.callbacks import ModelCheckpoint
+from tensorflow.keras.layers import GRU, LSTM, Bidirectional
+from tensorflow.keras.callbacks import ModelCheckpoint
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report
 from operator import itemgetter
 
 from load_data import get_train_test_pd
 from bert.extract_feature import BertVector
+
+import tensorflow as tf
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'   #指定第一块GPU可用
+config = tf.compat.v1.ConfigProto()
+config.gpu_options.per_process_gpu_memory_fraction = 0.8  # 程序最多只能占用指定gpu50%的显存
+config.gpu_options.allow_growth = True      #程序按需申请内存
+sess = tf.compat.v1.Session(config = config)
 
 # 读取文件并进行转换
 train_df, test_df = get_train_test_pd()
