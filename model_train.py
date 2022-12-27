@@ -19,17 +19,18 @@ from bert.extract_feature import BertVector
 
 import tensorflow as tf
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'   #指定第一块GPU可用
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'  # 指定第一块GPU可用
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.8  # 程序最多只能占用指定gpu50%的显存
-config.gpu_options.allow_growth = True      #程序按需申请内存
-sess = tf.compat.v1.Session(config = config)
+config.gpu_options.allow_growth = True  # 程序按需申请内存
+sess = tf.compat.v1.Session(config=config)
 
 # 读取文件并进行转换
 train_df, test_df = get_train_test_pd()
 bert_model = BertVector(pooling_strategy="NONE", max_seq_len=128)
 print('begin encoding')
-f = lambda text: bert_model.encode([text])["encodes"][0]
+def f(text): return bert_model.encode([text])["encodes"][0]
+
 
 train_df['x'] = train_df['text'].apply(f)
 test_df['x'] = test_df['text'].apply(f)
@@ -43,7 +44,8 @@ y_test = np.array([vec for vec in test_df['label']])
 # print('x_train: ', x_train.shape)
 
 # 将类型y值转化为ont-hot向量
-num_classes = 14
+# TODO 按需更改class数量
+num_classes = 5
 y_train = to_categorical(y_train, num_classes)
 y_test = to_categorical(y_test, num_classes)
 
@@ -72,8 +74,8 @@ if os.listdir(model_dir):
         os.remove(os.path.join(model_dir, file))
 
 # 保存最新的val_acc最好的模型文件
-filepath="models/per-rel-{epoch:02d}-{val_accuracy:.4f}.h5"
-checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1, save_best_only=True,mode='max')
+filepath = "models/per-rel-{epoch:02d}-{val_accuracy:.4f}.h5"
+checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1, save_best_only=True, mode='max')
 
 # 模型训练以及评估
 history = model.fit(x_train, y_train, validation_data=(x_test, y_test), batch_size=16, epochs=30, callbacks=[early_stopping, checkpoint])
